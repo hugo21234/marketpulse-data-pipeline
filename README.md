@@ -1,10 +1,12 @@
 # MarketPulse Data Pipeline
 
-Pipeline de engenharia de dados para coleta, processamento e análise de dados do mercado financeiro utilizando **Python**, **Apache Airflow**, **Alpha Vantage**, **Supabase/PostgreSQL** e **Oracle Cloud**.
+Pipeline de engenharia de dados para coleta, processamento e análise de dados do mercado financeiro utilizando **Python**, **Apache Airflow**, **Alpha Vantage** e uma arquitetura analítica nativa da AWS.
 
-O projeto foi desenhado como um laboratório prático de engenharia de dados com infraestrutura gratuita, baixo custo operacional e foco em conceitos reais: orquestração, ingestão batch, idempotência, controle de cota, qualidade de dados, modelagem analítica e observabilidade.
+O projeto foi desenhado como um laboratório prático de engenharia de dados, com foco em conceitos reais: orquestração, ingestão batch, idempotência, controle de cota, data lake, formatos colunares, catálogo de dados, modelagem dimensional, qualidade, observabilidade e operação de um warehouse serverless.
 
-> **Escopo honesto:** o plano gratuito do Alpha Vantage permite até 25 requisições por dia e não fornece cotações de ações em tempo real gratuitamente. Por isso, o MVP é uma pipeline **batch diária**. Uma trilha de streaming pode ser adicionada futuramente com outra fonte pública.
+> **Escopo honesto:** o plano gratuito do Alpha Vantage permite até 25 requisições por dia e não fornece cotações de ações em tempo real gratuitamente. Por isso, o MVP será uma pipeline **batch diária**. Uma trilha de streaming poderá ser adicionada futuramente com outra fonte pública.
+
+> **Decisão pedagógica:** o volume inicial poderia ser atendido por PostgreSQL ou Athena. O Amazon Redshift Serverless será adotado deliberadamente para estudar uma arquitetura analítica AWS completa, incluindo integração com S3, IAM, Glue, modelagem dimensional, cargas incrementais e operação de warehouse.
 
 ## Objetivo
 
@@ -12,7 +14,7 @@ Construir uma plataforma capaz de responder:
 
 > Quais ativos apresentaram movimentos relevantes de preço, volume e volatilidade no último pregão?
 
-A primeira versão monitorará uma watchlist pequena de ativos, preservará as respostas brutas da API, normalizará os dados e produzirá indicadores analíticos para consulta.
+A primeira versão monitorará uma watchlist pequena de ativos, preservará as respostas brutas da API, transformará os dados em Parquet, disponibilizará consultas no Athena e carregará um modelo analítico no Redshift Serverless.
 
 ## Arquitetura
 
@@ -20,97 +22,79 @@ A primeira versão monitorará uma watchlist pequena de ativos, preservará as r
 Alpha Vantage
       |
       v
-Apache Airflow na Oracle Cloud
+Apache Airflow em Amazon EC2
       |
-      +--> Bronze: JSON/CSV bruto em disco ou OCI Object Storage
+      +--> Amazon S3 Bronze
+      |      JSON bruto e imutável
       |
       +--> Transformações Python
       |
-      v
-Supabase / PostgreSQL
+      +--> Amazon S3 Silver
+      |      Parquet limpo, tipado e particionado
       |
-      +--> Silver: dados normalizados
+      +--> AWS Glue Data Catalog
+      |      Catálogo das tabelas externas
       |
-      +--> Gold: métricas e sinais analíticos
+      +--> Amazon Athena
+      |      Exploração e validação direta no data lake
+      |
+      +--> Amazon Redshift Serverless
+             staging -> analytics -> gold
 ```
 
-### Responsabilidade de cada componente
+Serviços transversais:
+
+```text
+IAM                  controle de acesso entre serviços
+CloudWatch           logs, métricas e alertas
+AWS Budgets          monitoramento de custos
+Parameter Store      segredos e configurações sensíveis
+```
+
+## Responsabilidade de cada componente
 
 | Componente | Responsabilidade |
 |---|---|
-| Alpha Vantage | Fonte de preços diários e dados financeiros |
+| Alpha Vantage | Fonte de preços diários e fundamentos |
 | Apache Airflow | Agendamento, dependências, retries, backfills e monitoramento |
+| Amazon EC2 | Hospedagem do Airflow |
 | Python | Extração, validação, transformação e carga |
-| OCI Object Storage ou disco da VM | Preservação das respostas brutas |
-| Supabase/PostgreSQL | Camada analítica e de consulta |
-| Oracle Cloud VM | Hospedagem contínua do Airflow |
+| Amazon S3 Bronze | Preservação da resposta original da API |
+| Amazon S3 Silver | Armazenamento colunar em Parquet |
+| AWS Glue Data Catalog | Definição e descoberta das tabelas do data lake |
+| Amazon Athena | Consultas SQL diretamente sobre os arquivos no S3 |
+| Amazon Redshift Serverless | Warehouse OLAP para staging, modelo dimensional e camada Gold |
+| IAM | Permissões entre EC2, S3, Glue, Athena e Redshift |
+| CloudWatch | Logs, métricas e observabilidade operacional |
+| AWS Budgets | Alertas e proteção contra custos inesperados |
 
-## Infraestrutura gratuita
+## Por que OLAP neste projeto?
 
-A configuração recomendada para o Airflow é uma instância Oracle Cloud **VM.Standard.A1.Flex**, baseada em ARM.
+O MarketPulse é predominantemente analítico. As consultas esperadas envolvem séries históricas, janelas temporais, agregações, médias móveis, volatilidade e comparação entre ativos.
 
-Configuração sugerida:
-
-```text
-2 OCPUs
-12 GB de RAM
-Ubuntu ARM
-50–80 GB de disco
-```
-
-A franquia Always Free da Oracle equivale a até 2 OCPUs e 12 GB de memória para instâncias A1 Flex. A antiga `VM.Standard.E2.1.Micro`, com 1 GB de RAM, não é adequada para uma instalação estável do Airflow em containers.
-
-Para reduzir o consumo de recursos, o projeto utilizará uma implantação mínima:
+Exemplos:
 
 ```text
-Airflow Scheduler
-Airflow Webserver/API
-LocalExecutor
-PostgreSQL local para metadados do Airflow
-Máximo de 1–2 tasks simultâneas
+Qual foi o retorno acumulado por ativo nos últimos 30 dias?
+Qual ativo apresentou maior volatilidade no período?
+Como o volume negociado mudou em relação à média recente?
+Quais movimentos fugiram do comportamento histórico?
 ```
 
-Não serão utilizados Celery, Redis, Kubernetes ou múltiplos workers no MVP.
-
-## Limites do Alpha Vantage
-
-O plano gratuito permite até **25 requisições por dia**. O projeto adotará um orçamento operacional inferior ao limite para manter margem para testes e retries.
-
-Exemplo com cinco ativos:
-
-```text
-5 requisições diárias para preços
-5 requisições semanais para fundamentos
-Margem restante para testes e reprocessamentos
-```
-
-Toda chamada deverá ser registrada antes ou depois da execução para evitar consumo acidental da cota.
-
-## Watchlist inicial
-
-```text
-AAPL
-MSFT
-NVDA
-AMZN
-GOOGL
-```
-
-A watchlist será configurável, mas permanecerá pequena durante o MVP.
+Esse padrão de acesso é diferente de um sistema OLTP, que prioriza operações transacionais pequenas, como cadastrar usuários, atualizar pedidos ou consultar o estado atual de uma entidade.
 
 ## Camadas de dados
 
-### Bronze
+### Bronze — Amazon S3
 
 Preserva a resposta original da API antes de qualquer transformação.
 
 ```text
-data/bronze/
-└── daily_prices/
-    └── extraction_date=YYYY-MM-DD/
-        ├── AAPL.json
-        ├── MSFT.json
-        └── NVDA.json
+s3://marketpulse-data-lake/bronze/daily_prices/
+└── extraction_date=YYYY-MM-DD/
+    ├── AAPL.json
+    ├── MSFT.json
+    └── NVDA.json
 ```
 
 Objetivos:
@@ -118,56 +102,108 @@ Objetivos:
 - permitir auditoria;
 - reprocessar sem consumir novamente a API;
 - investigar mudanças de schema;
-- preservar evidência da extração.
+- preservar evidência da extração;
+- desacoplar a fonte do restante da arquitetura.
 
-### Silver
+### Silver — Amazon S3 + Parquet
 
-Dados limpos, tipados, deduplicados e normalizados no Supabase.
+Dados limpos, tipados, deduplicados e convertidos para formato colunar.
 
-Tabela principal: `fact_daily_price`.
+```text
+s3://marketpulse-data-lake/silver/daily_prices/
+└── symbol=AAPL/
+    └── year=2026/
+        └── month=07/
+            └── data.parquet
+```
+
+Tabela lógica principal: `silver_daily_price`.
 
 | Campo | Descrição |
 |---|---|
 | asset_id | Identificador do ativo |
+| symbol | Código do ativo |
 | reference_date | Data do pregão |
 | open_price | Preço de abertura |
 | high_price | Maior preço |
 | low_price | Menor preço |
 | close_price | Preço de fechamento |
+| adjusted_close | Fechamento ajustado |
 | volume | Volume negociado |
+| source | Fonte do dado |
 | extracted_at | Momento da extração |
 
 Chave lógica:
 
 ```text
-asset_id + reference_date
+symbol + reference_date
 ```
 
 Essa restrição torna a carga idempotente e impede duplicações durante retries ou reprocessamentos.
 
-### Gold
+### Catálogo — AWS Glue Data Catalog
 
-Camada de métricas derivadas para consumo analítico.
+O Glue Catalog registrará o schema e as partições dos arquivos Silver.
 
-Tabela proposta: `gold_asset_daily_signal`.
+Responsabilidades:
 
-| Campo | Descrição |
-|---|---|
-| asset_id | Identificador do ativo |
-| reference_date | Data de referência |
-| daily_return | Retorno diário |
-| volume_change | Variação de volume |
-| moving_average_7d | Média móvel de 7 dias |
-| moving_average_30d | Média móvel de 30 dias |
-| volatility_30d | Volatilidade histórica de 30 dias |
-| price_anomaly_score | Indicador de desvio do comportamento recente |
-| signal_classification | Classificação analítica |
+- manter o catálogo das tabelas externas;
+- disponibilizar metadados para Athena;
+- facilitar descoberta e evolução de schema;
+- centralizar a definição lógica dos dados no S3.
 
-A classificação não representa recomendação de investimento. Ela apenas identifica movimentos estatisticamente relevantes para fins educacionais.
+### Exploração — Amazon Athena
+
+O Athena será utilizado para:
+
+- validar arquivos Parquet;
+- conferir partições;
+- executar consultas exploratórias;
+- investigar falhas de carga;
+- comparar dados do lake com o warehouse.
+
+Athena não será a principal camada de serving do projeto. Sua função será exploração, inspeção e validação do data lake.
+
+### Warehouse — Amazon Redshift Serverless
+
+O Redshift será organizado em três schemas:
+
+```text
+staging
+analytics
+gold
+```
+
+#### `staging`
+
+Recebe dados carregados do S3 antes de merges e validações finais.
+
+```text
+staging.daily_price
+staging.company_fundamentals
+```
+
+#### `analytics`
+
+Contém o modelo dimensional principal.
+
+```text
+analytics.dim_asset
+analytics.fact_daily_price
+analytics.snapshot_company_fundamentals
+```
+
+#### `gold`
+
+Contém métricas prontas para consumo analítico.
+
+```text
+gold.asset_daily_signal
+```
 
 ## Modelo de dados
 
-### `dim_asset`
+### `analytics.dim_asset`
 
 ```text
 asset_id
@@ -182,7 +218,7 @@ created_at
 updated_at
 ```
 
-### `fact_daily_price`
+### `analytics.fact_daily_price`
 
 ```text
 asset_id
@@ -197,7 +233,7 @@ source
 extracted_at
 ```
 
-### `snapshot_company_fundamentals`
+### `analytics.snapshot_company_fundamentals`
 
 ```text
 asset_id
@@ -212,21 +248,7 @@ analyst_target_price
 extracted_at
 ```
 
-### `api_request_log`
-
-```text
-request_id
-endpoint
-symbol
-requested_at
-status_code
-response_type
-dag_id
-task_id
-attempt_number
-```
-
-### `gold_asset_daily_signal`
+### `gold.asset_daily_signal`
 
 ```text
 asset_id
@@ -241,6 +263,34 @@ signal_classification
 calculated_at
 ```
 
+A classificação não representa recomendação de investimento. Ela apenas identifica movimentos estatisticamente relevantes para fins educacionais.
+
+## Limites do Alpha Vantage
+
+O plano gratuito permite até **25 requisições por dia**. O projeto adotará um orçamento operacional inferior ao limite para manter margem para testes e retries.
+
+Exemplo com cinco ativos:
+
+```text
+5 requisições diárias para preços
+5 requisições semanais para fundamentos
+Margem restante para testes e reprocessamentos
+```
+
+Toda chamada deverá ser registrada para evitar consumo acidental da cota.
+
+## Watchlist inicial
+
+```text
+AAPL
+MSFT
+NVDA
+AMZN
+GOOGL
+```
+
+A watchlist será configurável, mas permanecerá pequena durante o MVP.
+
 ## DAGs planejadas
 
 ### `daily_market_prices`
@@ -254,11 +304,17 @@ extract_daily_prices
       ↓
 validate_api_response
       ↓
-save_raw_response
+save_raw_to_s3_bronze
       ↓
 normalize_prices
       ↓
-upsert_supabase
+write_parquet_to_s3_silver
+      ↓
+update_glue_partitions
+      ↓
+copy_to_redshift_staging
+      ↓
+merge_fact_and_dimensions
       ↓
 run_quality_checks
 ```
@@ -272,11 +328,15 @@ check_api_quota
       ↓
 extract_company_overview
       ↓
-save_raw_response
+save_raw_to_s3_bronze
       ↓
 normalize_fundamentals
       ↓
-upsert_supabase
+write_parquet_to_s3_silver
+      ↓
+copy_to_redshift_staging
+      ↓
+merge_fundamentals_snapshot
 ```
 
 ### `daily_asset_signals`
@@ -308,7 +368,9 @@ Validações iniciais:
 - presença dos ativos esperados;
 - resposta da API sem mensagem de limite excedido;
 - quantidade de requisições dentro do orçamento diário;
-- data do pregão não futura.
+- data do pregão não futura;
+- arquivos Parquet disponíveis na partição esperada;
+- quantidade de linhas reconciliada entre S3 e Redshift.
 
 ## Estrutura planejada do repositório
 
@@ -329,15 +391,21 @@ marketpulse-data-pipeline/
 │   ├── quality/
 │   ├── storage/
 │   └── domain/
+├── infra/
+│   ├── iam/
+│   ├── redshift/
+│   ├── s3/
+│   └── monitoring/
 ├── sql/
 │   ├── ddl/
-│   └── analytics/
+│   ├── staging/
+│   ├── analytics/
+│   └── gold/
 ├── tests/
 │   ├── unit/
 │   ├── integration/
 │   └── fixtures/
 ├── data/
-│   ├── bronze/
 │   └── samples/
 ├── docker-compose.yml
 ├── .env.example
@@ -352,7 +420,7 @@ A lógica de negócio permanecerá em `src/`. Os arquivos das DAGs serão respon
 
 ### Idempotência
 
-Executar novamente uma DAG para a mesma data não poderá duplicar registros. As cargas utilizarão chaves únicas e operações de upsert.
+Executar novamente uma DAG para a mesma data não poderá duplicar registros. As cargas utilizarão chaves lógicas, staging tables e operações de merge.
 
 ### Backfill
 
@@ -360,7 +428,7 @@ As DAGs deverão aceitar uma data de referência para permitir reprocessar perí
 
 ### Controle de cota
 
-O pipeline verificará o `api_request_log` antes de cada chamada. Uma task não deverá consumir a API quando o orçamento diário estiver próximo do limite.
+O pipeline verificará o histórico de chamadas antes de cada requisição. Uma task não deverá consumir a API quando o orçamento diário estiver próximo do limite.
 
 ### Observabilidade
 
@@ -370,93 +438,138 @@ Cada execução deverá registrar:
 requisições realizadas
 ativos processados
 registros extraídos
-registros carregados
+arquivos gravados no S3
+registros carregados no Redshift
 registros rejeitados
 duração da task
 status da carga
 data máxima disponível
 ```
 
+Os logs do Airflow e das integrações AWS serão enviados ao CloudWatch quando a infraestrutura base estiver estável.
+
 ### Data quality
 
 Respostas HTTP bem-sucedidas não serão consideradas automaticamente válidas. A API pode devolver mensagens de limite ou erro dentro de uma resposta tecnicamente aceita.
 
+### Separação entre storage e serving
+
+O S3 será a fonte histórica durável. O Redshift será a camada de serving analítico.
+
+Essa separação permite:
+
+- reprocessar dados sem consultar novamente a API;
+- reconstruir tabelas analíticas;
+- trocar o mecanismo de consulta futuramente;
+- reduzir acoplamento entre ingestão e consumo.
+
 ## Segurança
 
 - não versionar a chave do Alpha Vantage;
-- não versionar credenciais do Supabase;
-- utilizar variáveis de ambiente ou Connections do Airflow;
+- não versionar credenciais AWS;
+- utilizar IAM Roles em vez de chaves estáticas quando possível;
+- armazenar segredos no Parameter Store ou Secrets Manager;
 - manter `.env` fora do Git;
 - disponibilizar somente `.env.example`;
 - evitar exposição pública direta da interface do Airflow;
 - acessar o Airflow por túnel SSH ou proxy autenticado;
-- manter o PostgreSQL de metadados do Airflow separado do banco analítico;
-- preservar dados importantes fora do disco efêmero da VM.
+- aplicar princípio do menor privilégio nas policies IAM;
+- bloquear acesso público aos buckets S3;
+- evitar deixar o Redshift publicamente acessível.
+
+## Controle de custos
+
+A arquitetura foi desenhada para aprendizado, mas nem todos os serviços são permanentemente gratuitos.
+
+Medidas obrigatórias:
+
+- criar um AWS Budget antes do provisionamento;
+- configurar alertas de cobrança;
+- acompanhar consumo de Redshift Processing Units;
+- limitar consultas e cargas desnecessárias;
+- particionar arquivos no S3 para reduzir leitura no Athena;
+- encerrar recursos de laboratório quando não estiverem em uso;
+- revisar diariamente o Billing Dashboard durante a fase inicial.
+
+| Serviço | Uso planejado | Observação |
+|---|---|---|
+| Alpha Vantage | Até 25 requisições diárias | Plano gratuito limitado |
+| Amazon EC2 | Airflow mínimo | Depende da elegibilidade da conta e do tipo de instância |
+| Amazon S3 | Pequeno volume de JSON e Parquet | Baixo custo, mas não zero por definição |
+| AWS Glue Data Catalog | Catálogo pequeno | Validar limites atuais |
+| Amazon Athena | Consultas ocasionais | Cobrança por dados processados |
+| Redshift Serverless | Laboratório analítico | Requer controle rigoroso de uso |
+| CloudWatch | Logs essenciais | Retenção deve ser configurada |
 
 ## Roadmap
 
-### Fase 1 — Fundação
+### Fase 1 — Fundação AWS
 
 - [x] Criar repositório
 - [x] Definir arquitetura inicial
+- [x] Evoluir arquitetura para AWS analítica
+- [ ] Criar AWS Budget e alertas
 - [ ] Criar estrutura de pastas
 - [ ] Configurar ambiente Python
-- [ ] Criar projeto Supabase
-- [ ] Definir tabelas e constraints
 - [ ] Configurar Airflow localmente
+- [ ] Criar IAM Roles mínimas
+- [ ] Criar bucket S3 com prefixos Bronze e Silver
 
 ### Fase 2 — Pipeline batch
 
 - [ ] Implementar extração de preços diários
-- [ ] Preservar respostas na camada bronze
+- [ ] Preservar respostas na camada Bronze
 - [ ] Normalizar preços
-- [ ] Implementar carga idempotente no Supabase
+- [ ] Gerar arquivos Parquet
 - [ ] Criar DAG `daily_market_prices`
 - [ ] Implementar controle de cota
+- [ ] Garantir idempotência e backfill
 
-### Fase 3 — Qualidade e analytics
+### Fase 3 — Lakehouse básico
 
-- [ ] Criar validações de qualidade
-- [ ] Calcular retornos e médias móveis
-- [ ] Calcular volatilidade histórica
-- [ ] Criar tabela gold
-- [ ] Adicionar consultas analíticas
-- [ ] Criar testes unitários e de integração
+- [ ] Criar tabelas no Glue Catalog
+- [ ] Registrar partições Silver
+- [ ] Validar dados no Athena
+- [ ] Criar consultas de reconciliação
+- [ ] Adicionar testes de qualidade
 
-### Fase 4 — Deploy
+### Fase 4 — Warehouse analítico
 
-- [ ] Criar VM Oracle A1 Flex
+- [ ] Criar namespace e workgroup do Redshift Serverless
+- [ ] Configurar acesso do Redshift ao S3
+- [ ] Criar schemas `staging`, `analytics` e `gold`
+- [ ] Implementar carga via `COPY`
+- [ ] Criar dimensões e fatos
+- [ ] Implementar merges incrementais
+- [ ] Criar métricas Gold
+
+### Fase 5 — Deploy e observabilidade
+
+- [ ] Criar instância EC2
 - [ ] Instalar Docker e Docker Compose
 - [ ] Implantar Airflow mínimo
 - [ ] Configurar volumes persistentes
 - [ ] Configurar acesso seguro
-- [ ] Validar execução agendada
+- [ ] Integrar logs ao CloudWatch
+- [ ] Validar execução agendada ponta a ponta
 
-### Fase 5 — Evolução opcional
+### Fase 6 — Evolução opcional
 
 Após o batch estar estável, poderá ser adicionada uma fonte pública via WebSocket para estudar streaming e microbatch. O consumidor contínuo será um serviço separado; o Airflow processará apenas janelas concluídas.
-
-## Custos
-
-O projeto foi planejado para operar dentro de planos gratuitos:
-
-| Serviço | Uso planejado | Custo esperado |
-|---|---|---:|
-| Alpha Vantage | Até 25 requisições diárias | R$ 0 |
-| Oracle Cloud A1 Flex | Dentro da franquia Always Free | R$ 0 |
-| Supabase | Plano gratuito | R$ 0 |
-| Apache Airflow | Código aberto | R$ 0 |
-| Python | Código aberto | R$ 0 |
-
-Os limites e condições dos provedores podem mudar. Antes do deploy, confirme a elegibilidade dos recursos e configure alertas de orçamento na Oracle Cloud.
 
 ## Referências oficiais
 
 - [Alpha Vantage — documentação da API](https://www.alphavantage.co/documentation/)
 - [Alpha Vantage — suporte e limites](https://www.alphavantage.co/support/)
 - [Apache Airflow — documentação](https://airflow.apache.org/docs/)
-- [Oracle Cloud — recursos Always Free](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm)
-- [Supabase — documentação](https://supabase.com/docs)
+- [Amazon EC2 — documentação](https://docs.aws.amazon.com/ec2/)
+- [Amazon S3 — documentação](https://docs.aws.amazon.com/s3/)
+- [AWS Glue Data Catalog — documentação](https://docs.aws.amazon.com/glue/)
+- [Amazon Athena — documentação](https://docs.aws.amazon.com/athena/)
+- [Amazon Redshift Serverless — documentação](https://docs.aws.amazon.com/redshift/latest/mgmt/working-with-serverless.html)
+- [AWS IAM — documentação](https://docs.aws.amazon.com/iam/)
+- [Amazon CloudWatch — documentação](https://docs.aws.amazon.com/cloudwatch/)
+- [AWS Budgets — documentação](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html)
 
 ## Aviso
 
