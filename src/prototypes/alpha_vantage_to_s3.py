@@ -6,9 +6,7 @@ import boto3
 import requests
 from dotenv import load_dotenv
 
-
-class AlphaVantageResponseError(Exception):
-    """Erro retornado no conteúdo da resposta da Alpha Vantage."""
+import ExPersonalizad
 
 
 load_dotenv()
@@ -64,10 +62,10 @@ def buscar_dados_daily(symbol: str, api_key: str) -> dict:
     )
 
     if mensagem_api:
-        raise AlphaVantageResponseError(mensagem_api)
+        raise ExPersonalizad.AlphaVantageResponseError(mensagem_api)
 
     if "Time Series (Daily)" not in payload:
-        raise AlphaVantageResponseError(
+        raise ExPersonalizad.AlphaVantageResponseError(
             "A série temporal diária não foi encontrada."
         )
 
@@ -107,7 +105,7 @@ def main() -> None:
         payload = buscar_dados_daily(symbol, ALPHAVANTAGE_API_KEY)
         s3_uri = salvar_json_no_s3(payload, symbol)
         print(f"Carga concluída: {s3_uri}")
-    except AlphaVantageResponseError as error:
+    except ExPersonalizad.AlphaVantageResponseError as error:
         print(f"Erro de conteúdo da Alpha Vantage: {error}")
         raise
 
