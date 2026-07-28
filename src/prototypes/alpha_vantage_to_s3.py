@@ -1,6 +1,5 @@
-import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import boto3
 import requests
@@ -11,16 +10,30 @@ import ExPersonalizad
 
 load_dotenv()
 
+AWS_REGION = "sa-east-1"
+SYMBOL = "AAPL"
 ALPHAVANTAGE_URL = os.getenv("ALPHAVANTAGE_URL")
-ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
-S3_KEY_PREFIX = os.getenv(
-    "S3_KEY_PREFIX",
-    "bronze/alphavantage/time_series_daily",
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME") or os.getenv("S3-BUCKET-NAME")
+S3_KEY_PREFIX = (
+    os.getenv("S3_KEY_PREFIX")
+    or os.getenv("key_Prefix")
+    or "bronze/alphavantage/time_series_daily"
 )
+SSM_PARAMETER_NAME = "/marketpulse/alphavantage/api_key"
 
 
-def buscar_dados_daily(symbol: str, api_key: str) -> dict:
+def buscar_parametro_api_key() -> str:
+    ssm_client = boto3.client("ssm", region_name=AWS_REGION)
+
+    response = ssm_client.get_parameter(
+        Name=SSM_PARAMETER_NAME,
+        WithDecryption=True,
+    )
+
+    return response["Parameter"]["Value"]
+
+
+def buscar_dados_daily(symbol: str, api_key: str) -> str:
     params = {
         "function": "TIME_SERIES_DAILY",
         "symbol": symbol,
@@ -69,26 +82,32 @@ def buscar_dados_daily(symbol: str, api_key: str) -> dict:
             "A série temporal diária não foi encontrada."
         )
 
-    return payload
+    # O dicionário é usado somente para validação.
+    # A Bronze recebe o texto original retornado pela fonte.
+    return response.text
 
 
-def salvar_json_no_s3(payload: dict, symbol: str) -> str:
-    extraction_date = datetime.now().strftime("%Y-%m-%d")
-    object_key = (
+def construir_chave_s3(symbol: str) -> str:
+    instante_utc = datetime.now(timezone.utc)
+    timestamp = instante_utc.strftime("%Y%m%dT%H%M%SZ")
+    data_ingestao = instante_utc.strftime("%Y-%m-%d")
+
+    return (
         f"{S3_KEY_PREFIX}/"
         f"symbol={symbol}/"
-        f"extraction_date={extraction_date}/"
-        "data.json"
+        f"ingestion_date={data_ingestao}/"
+        f"{timestamp}.json"
     )
-    serialized_payload = json.dumps(payload).encode("utf-8")
 
-    s3_client = boto3.client("s3", region_name="sa-east-1")
+
+def salvar_json_bruto_no_s3(conteudo_bruto: str, object_key: str) -> str:
+    s3_client = boto3.client("s3", region_name=AWS_REGION)
 
     try:
         s3_client.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=object_key,
-            Body=serialized_payload,
+            Body=conteudo_bruto.encode("utf-8"),
             ContentType="application/json",
         )
     except Exception as error:
@@ -99,12 +118,12 @@ def salvar_json_no_s3(payload: dict, symbol: str) -> str:
 
 
 def main() -> None:
-    symbol = "AAPL"
-
     try:
-        payload = buscar_dados_daily(symbol, ALPHAVANTAGE_API_KEY)
-        s3_uri = salvar_json_no_s3(payload, symbol)
-        print(f"Carga concluída: {s3_uri}")
+        api_key = buscar_parametro_api_key()
+        conteudo_bruto = buscar_dados_daily(SYMBOL, api_key)
+        object_key = construir_chave_s3(SYMBOL)
+        s3_uri = salvar_json_bruto_no_s3(conteudo_bruto, object_key)
+        print(f"Carga Bronze concluída: {s3_uri}")
     except ExPersonalizad.AlphaVantageResponseError as error:
         print(f"Erro de conteúdo da Alpha Vantage: {error}")
         raise
