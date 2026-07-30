@@ -1,3 +1,4 @@
+import argparse
 import os
 from datetime import datetime, timezone
 
@@ -11,15 +12,26 @@ import ExPersonalizad
 load_dotenv()
 
 AWS_REGION = "sa-east-1"
-SYMBOL = "AAPL"
 ALPHAVANTAGE_URL = os.getenv("ALPHAVANTAGE_URL")
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME") or os.getenv("S3-BUCKET-NAME")
+S3_BUCKET_NAME = (
+    os.getenv("S3_BUCKET_NAME")
+    or os.getenv("S3-BUCKET_NAME")
+    or os.getenv("S3-BUCKET-NAME")
+)
 S3_KEY_PREFIX = (
     os.getenv("S3_KEY_PREFIX")
     or os.getenv("key_Prefix")
     or "bronze/alphavantage/time_series_daily"
 )
 SSM_PARAMETER_NAME = "/marketpulse/alphavantage/api_key"
+
+
+def validar_configuracoes() -> None:
+    if not ALPHAVANTAGE_URL:
+        raise ValueError("A variável ALPHAVANTAGE_URL não foi encontrada.")
+
+    if not S3_BUCKET_NAME:
+        raise ValueError("A variável S3_BUCKET_NAME não foi encontrada.")
 
 
 def buscar_parametro_api_key() -> str:
@@ -82,13 +94,11 @@ def buscar_dados_daily(symbol: str, api_key: str) -> str:
             "A série temporal diária não foi encontrada."
         )
 
-    # O dicionário é usado somente para validação.
-    # A Bronze recebe o texto original retornado pela fonte.
+    # A Bronze preserva exatamente o texto devolvido pela fonte.
     return response.text
 
 
-def construir_chave_s3(symbol: str) -> str:
-    instante_utc = datetime.now(timezone.utc)
+def construir_chave_s3(symbol: str, instante_utc: datetime) -> str:
     timestamp = instante_utc.strftime("%Y%m%dT%H%M%SZ")
     data_ingestao = instante_utc.strftime("%Y-%m-%d")
 
@@ -114,16 +124,33 @@ def salvar_json_bruto_no_s3(conteudo_bruto: str, object_key: str) -> str:
         print(f"Erro ao enviar para o S3: {error}")
         raise
 
-    return f"s3://{S3_BUCKET_NAME}/{object_key}"
+    # O contrato entre as tarefas é a object key, não a URI completa.
+    return object_key
+
+
+def executar_bronze(symbol: str) -> str:
+    validar_configuracoes()
+
+    api_key = buscar_parametro_api_key()
+    conteudo_bruto = buscar_dados_daily(symbol, api_key)
+    instante_utc = datetime.now(timezone.utc)
+    object_key = construir_chave_s3(symbol, instante_utc)
+
+    return salvar_json_bruto_no_s3(conteudo_bruto, object_key)
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Extrai preços diários da Alpha Vantage e salva o JSON na Bronze."
+    )
+    parser.add_argument("--symbol", default="AAPL")
+    args = parser.parse_args()
+
     try:
-        api_key = buscar_parametro_api_key()
-        conteudo_bruto = buscar_dados_daily(SYMBOL, api_key)
-        object_key = construir_chave_s3(SYMBOL)
-        s3_uri = salvar_json_bruto_no_s3(conteudo_bruto, object_key)
-        print(f"Carga Bronze concluída: {s3_uri}")
+        object_key = executar_bronze(args.symbol)
+        print("Carga Bronze concluída.")
+        print(f"Key: {object_key}")
+        print(f"URI: s3://{S3_BUCKET_NAME}/{object_key}")
     except ExPersonalizad.AlphaVantageResponseError as error:
         print(f"Erro de conteúdo da Alpha Vantage: {error}")
         raise
