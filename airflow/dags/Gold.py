@@ -132,12 +132,15 @@ def Analisando_Dados(df: pd.DataFrame):
     )
     df["retorno_diario_percentual"] = retorno_diarioPCT.round(2)
 
+    retorno_fechamento = df["close_price"].pct_change()
     df["volatilidade_7d_percentual"] = (
-        retorno_diarioPCT.rolling(window=7)
+        retorno_fechamento
+        .rolling(window=7)
         .std()
         .mul(100)
         .round(2)
     )
+
     df["symbol"] = df["symbol"].astype(str)
 
     df["reference_date"] = pd.to_datetime(
