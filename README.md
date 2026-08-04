@@ -8,6 +8,24 @@ O projeto foi desenhado como um laboratório prático de engenharia de dados, co
 
 > **Decisão pedagógica:** o volume inicial poderia ser atendido por PostgreSQL ou Athena. O Amazon Redshift Serverless será adotado deliberadamente para estudar uma arquitetura analítica AWS completa, incluindo integração com S3, IAM, Glue, modelagem dimensional, cargas incrementais e operação de warehouse.
 
+## Estado atual da implementação
+
+O pipeline implementado atualmente executa diariamente o seguinte fluxo:
+
+```text
+Alpha Vantage -> S3 Bronze (JSON) -> S3 Silver (Parquet)
+              -> S3 Gold (indicadores) -> AWS Glue Crawler
+```
+
+- o Airflow processa `AAPL`, `MSFT`, `GOOGL`, `AMZN` e `NVDA`;
+- as chamadas Bronze são serializadas para respeitar o limite da API;
+- a Silver tipa e valida datas, preços, volume, nulos e duplicidades;
+- a Gold calcula retorno, variação, média móvel e volatilidade;
+- o Glue Crawler atualiza o catálogo depois que todos os arquivos Gold existem;
+- EventBridge Scheduler e Lambda ligam e desligam a EC2 que hospeda o Airflow.
+
+Athena, Redshift Serverless, alertas e cargas incrementais descritos abaixo fazem parte do roadmap e ainda não estão implementados neste repositório.
+
 ## Objetivo
 
 Construir uma plataforma capaz de responder:
@@ -139,7 +157,7 @@ Chave lógica:
 symbol + reference_date
 ```
 
-Essa restrição torna a carga idempotente e impede duplicações durante retries ou reprocessamentos.
+Essa é a chave lógica pretendida. A carga atual ainda grava snapshots com timestamp; portanto, deduplicação entre execuções e idempotência completa permanecem como melhorias do roadmap.
 
 ### Catálogo — AWS Glue Data Catalog
 

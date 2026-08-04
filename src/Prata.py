@@ -13,7 +13,7 @@ load_dotenv()
 
 AWS_REGION = "sa-east-1"
 
-BUCKET_NAME = os.getenv("S3-BUCKET_NAME")
+BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
 SILVER_PREFIX = "silver/alphavantage/daily_prices"
 
@@ -160,13 +160,15 @@ def validar_dataframe(df):
 def construir_silver_key(symbol, instante_utc):
     ingestion_date = instante_utc.strftime("%Y-%m-%d")
     timestamp = instante_utc.strftime("%Y%m%dT%H%M%SZ")
-
-    return (
+    prataKey =  (
         f"{SILVER_PREFIX}/"
         f"symbol={symbol}/"
         f"ingestion_date={ingestion_date}/"
         f"{timestamp}.parquet"
     )
+
+    return prataKey
+
 
 
 def salvar_silver(df, silver_key):
@@ -220,18 +222,3 @@ def executar_silver(bronze_key, symbol):
 
     return chave_salva
 
-
-if __name__ == "__main__":
-    bronze_key_teste = (
-        "bronze/alphavantage/time_series_daily/"
-        "Symbol=AAPL/"
-        "ingestion_date=2026-07-29/"
-        "20260729T160705Z.json"
-    )
-
-    silver_key = executar_silver(
-        bronze_key=bronze_key_teste,
-        symbol="AAPL"
-    )
-
-    print(silver_key)
