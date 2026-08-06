@@ -1,0 +1,17 @@
+{
+  "Name": "marketpulse-stop-airflow-ec2",
+  "ScheduleExpression": "cron(15 0 * * ? *)",
+  "ScheduleExpressionTimezone": "America/Sao_Paulo",
+  "FlexibleTimeWindow": {
+    "Mode": "OFF"
+  },
+  "State": "DISABLED",
+  "Target": {
+    "Arn": "arn:aws:lambda:sa-east-1:966725470611:function:marketpulse-stop-ec2",
+    "RoleArn": "arn:aws:iam::966725470611:role/marketpulse-stop-airflow-scheduler-role",
+    "Input": "{}",
+    "RetryPolicy": {
+      "MaximumRetryAttempts": 2
+    }
+  }
+}

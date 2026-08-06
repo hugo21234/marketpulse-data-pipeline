@@ -1,0 +1,44 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+logs/
+airflow/logs/
+
+# Environment-specific AWS configuration
+infrastructure/lambda/environment.json
+infrastructure/lambda/stop_environment.json
+EOFcat >> .gitignore <<'EOF'
+
+# Environment-specific AWS configuration
+infrastructure/lambda/environment.json
+infrastructure/lambda/stop_environment.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Airflow runtime
+airflow/logs/
+airflow/config/airflow.cfg
+airflow/airflow.db
+*.log
+
+# Generated datasets
+*.parquet
+
+# Editor and backup files
+*.orig
+*.bak
+
+# Environment-specific AWS configuration
+infrastructure/lambda/environment.json
+infrastructure/lambda/stop_environment.json
