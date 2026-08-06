@@ -35,15 +35,15 @@ def validar_configuracoes():
         raise ValueError("A variável do bucket S3 não foi encontrada.")
 
 
-def construir_key(symbol, instante_utc):
-    if instante_utc.tzinfo is None:
+def construir_key(symbol, instant_utc):
+    if instant_utc.tzinfo is None:
         raise ValueError(
             "O instante da ingestão deve possuir timezone."
         )
 
-    instante_utc = instante_utc.astimezone(timezone.utc)
+    instant_utc = instant_utc.astimezone(timezone.utc)
 
-    data_ingestao = instante_utc.strftime("%Y-%m-%d")
+    data_ingestao = instant_utc.strftime("%Y-%m-%d")
 
     object_key = (
         f"{S3_KEY_PREFIX}/"
@@ -161,9 +161,9 @@ def salvar_bronze(dados_brutos, object_key):
     return object_key
 
 
-def executar_bronze(symbol,instante_utc=None):
-    if instante_utc is None:
-        instante_utc = datetime.now(timezone.utc)
+def executar_bronze(symbol, instant_utc=None):
+    if instant_utc is None:
+        instant_utc = datetime.now(timezone.utc)
 
     validar_configuracoes()
 
@@ -171,7 +171,7 @@ def executar_bronze(symbol,instante_utc=None):
 
     object_key = construir_key(
         symbol=symbol,
-        instante_utc=instante_utc
+        instant_utc=instant_utc
     )
 
     api_key = buscar_parametro_api_key()
@@ -186,7 +186,7 @@ def executar_bronze(symbol,instante_utc=None):
         object_key=object_key
     )
 
-    return {'chave_salva': chave_salva, 'bucket': S3_BUCKET_NAME, 'symbol': symbol, 'ingestion_date' : instante_utc.strftime("%Y-%m-%d %H:%M:%S %Z")}
+    return {'chave_salva': chave_salva, 'bucket': S3_BUCKET_NAME, 'symbol': symbol, 'ingestion_date' : instant_utc.strftime("%Y-%m-%d %H:%M:%S %Z")}
 
 
 

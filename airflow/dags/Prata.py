@@ -58,7 +58,7 @@ def transformar_dados(body):
     return registros
 
 
-def criar_dataframe(registros, symbol):
+def criar_dataframe(registros, symbol, instant_utc):
     df = pd.DataFrame(registros)
 
     if df.empty:
@@ -89,7 +89,7 @@ def criar_dataframe(registros, symbol):
 
     df["symbol"] = symbol
     df["source"] = "alphavantage"
-    df["extracted_at"] = datetime.now(timezone.utc)
+    df["extracted_at"] = instant_utc
 
     return df
 
@@ -157,9 +157,9 @@ def validar_dataframe(df):
     return df
 
 
-def construir_silver_key(symbol, instante_utc):
-    ingestion_date = instante_utc.strftime("%Y-%m-%d")
-    timestamp = instante_utc.strftime("%Y%m%dT%H%M%SZ")
+def construir_silver_key(symbol, instant_utc):
+    ingestion_date = instant_utc.strftime("%Y-%m-%d")
+    timestamp = instant_utc.strftime("%Y%m%dT%H%M%SZ")
 
     return (
         f"{SILVER_PREFIX}/"
@@ -190,23 +190,25 @@ def salvar_silver(df, silver_key):
     return silver_key
 
 
-def executar_silver(bronze_key, symbol):
+def executar_silver(bronze_key, symbol, instant_utc=None):
+    if instant_utc is None:
+        instant_utc = datetime.now(timezone.utc)
+
     body = pegar_body(bronze_key)
 
     registros = transformar_dados(body)
 
     df = criar_dataframe(
         registros=registros,
-        symbol=symbol
+        symbol=symbol,
+        instant_utc=instant_utc
     )
 
     df = validar_dataframe(df)
 
-    instante_utc = datetime.now(timezone.utc)
-
     silver_key = construir_silver_key(
         symbol=symbol,
-        instante_utc=instante_utc
+        instant_utc=instant_utc
     )
 
     chave_salva = salvar_silver(

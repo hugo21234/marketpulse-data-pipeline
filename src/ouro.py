@@ -165,8 +165,8 @@ def buscar_datas_gold_existentes(symbol: str) -> set[pd.Timestamp]:
 buscarDadosExistentes_ouro = buscar_datas_gold_existentes
 
 
-def construir_ouro_key(symbol: str, instante_utc: datetime) -> str:
-    processing_date = instante_utc.strftime("%Y-%m-%d")
+def construir_ouro_key(symbol: str, instant_utc: datetime) -> str:
+    processing_date = instant_utc.strftime("%Y-%m-%d")
     return (
         f"{OURO_PREFIX}/"
         f"symbol={symbol}/"
@@ -226,8 +226,8 @@ def executar_ouro(silver_key: str, symbol: str) -> str | None:
         print(f"Nenhum dado Gold novo para {symbol}. Nenhum arquivo será gravado.")
         return None
 
-    instante_utc = datetime.now(timezone.utc)
-    ouro_key = construir_ouro_key(symbol=symbol, instante_utc=instante_utc)
+    instant_utc = datetime.now(timezone.utc)
+    ouro_key = construir_ouro_key(symbol=symbol, instant_utc=instant_utc)
     chave_salva = salvar_ouro(df=df_novo, ouro_key=ouro_key)
 
     print("Carga ouro concluída.")

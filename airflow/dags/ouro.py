@@ -165,9 +165,9 @@ def Analisando_Dados(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def construir_ouro_key(symbol: str, instante_utc: datetime) -> str:
-    ingestion_date = instante_utc.strftime("%Y-%m-%d")
-    timestamp = instante_utc.strftime("%Y%m%dT%H%M%SZ")
+def construir_ouro_key(symbol: str, instant_utc: datetime) -> str:
+    ingestion_date = instant_utc.strftime("%Y-%m-%d")
+    timestamp = instant_utc.strftime("%Y%m%dT%H%M%SZ")
 
     return (
         f"{OURO_PREFIX}/"
@@ -210,11 +210,11 @@ def executar_ouro(silver_key: str, symbol: str) -> str:
     validar_dados(df)
 
     df_ouro = Analisando_Dados(df)
-    instante_utc = datetime.now(timezone.utc)
+    instant_utc = datetime.now(timezone.utc)
 
     ouro_key = construir_ouro_key(
         symbol=symbol,
-        instante_utc=instante_utc,
+        instant_utc=instant_utc,
     )
 
     chave_salva = salvar_ouro(
